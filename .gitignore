@@ -1,0 +1,6 @@
+# 忽略大文件
+data/no_duplicates_file.csv
+data/fer2013.csv
+
+# 如果你想忽略所有 CSV 文件，可以使用通配符
+# *.csv
