@@ -24,6 +24,10 @@ def save_images(data_path, train_path, valid_path):
     t_i = [1 for _ in range(0, 7)]  # 训练集文件计数器
     v_i = [1 for _ in range(0, 7)]  # 验证集文件计数器
 
+    # 初始化类别计数
+    train_counts = {i: 0 for i in range(7)}  # 训练集类别计数
+    valid_counts = {i: 0 for i in range(7)}  # 验证集类别计数
+
     for index in range(len(df)):
         emotion = int(df.iloc[index, 0])  # 第一列：emotion (类别)
         image = df.iloc[index, 1]        # 第二列：pixels (像素数据)
@@ -39,10 +43,22 @@ def save_images(data_path, train_path, valid_path):
             t_p = os.path.join(train_path, str(emotion), f'{t_i[emotion]}.jpg')
             im.save(t_p)
             t_i[emotion] += 1
+            train_counts[emotion] += 1  # 训练集计数增加
         else:
             v_p = os.path.join(valid_path, str(emotion), f'{v_i[emotion]}.jpg')
             im.save(v_p)
             v_i[emotion] += 1
+            valid_counts[emotion] += 1  # 验证集计数增加
+
+    # 打印每个类别的训练集和验证集数量
+    print("Training set class counts:")
+    for emotion, count in train_counts.items():
+        print(f"Class {emotion}: {count} images")
+
+    print("\nValidation set class counts:")
+    for emotion, count in valid_counts.items():
+        print(f"Class {emotion}: {count} images")
+
     print(f"Images saved to {train_path} and {valid_path}.")
 
 if __name__ == "__main__":
@@ -54,4 +70,4 @@ if __name__ == "__main__":
     # 执行目录创建和图片保存
     make_dir(train_path, valid_path)
     save_images(data_path, train_path, valid_path)
-    print("successful processed")
+    print("Successfully processed.")

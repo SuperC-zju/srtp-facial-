@@ -161,85 +161,178 @@ class GoogleNet(nn.Module):
         return x
 
 
-class Residual(nn.Module):
-    def __init__(self, input_channels, num_channels, use_1x1conv=False, strides=1):
-        super(Residual, self).__init__()
-        self.conv1 = nn.Conv2d(input_channels, num_channels, kernel_size=3, padding=1, stride=strides)  # 第一个卷积层
-        self.conv2 = nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1)  # 第二个卷积层
-        
-        if use_1x1conv:  # 如果需要调整输入输出通道，则使用1x1卷积
-            self.conv3 = nn.Conv2d(input_channels, num_channels, kernel_size=1, stride=strides)
-        else:
-            self.conv3 = None
-        
-        self.bn1 = nn.BatchNorm2d(num_channels)  # 第一个批归一化层
-        self.bn2 = nn.BatchNorm2d(num_channels)  # 第二个批归一化层
-        self.relu = nn.ReLU(inplace=True)  # 激活函数（ReLU）
-    
-    def forward(self, X):
-        Y = F.relu(self.bn1(self.conv1(X)))  # 第一个卷积、批归一化和激活
-        Y = self.bn2(self.conv2(Y))  # 第二个卷积和批归一化
-        if self.conv3:  # 如果需要1x1卷积调整输入输出通道
-            X = self.conv3(X)
-        Y += X  # 残差连接
-        return F.relu(Y)  # 最后通过ReLU激活
 
+# 定义基本残差块（用于 ResNet18 和 ResNet34）
+class BasicBlock(nn.Module):
+    expansion = 1
 
-class ResNet(nn.Module):
-    def __init__(self, num_classes=7):
-        super(ResNet, self).__init__()
-
-        # 第一个残差模块
-        self.b1 = nn.Sequential(
-            Residual(1, 64, use_1x1conv=False, strides=1),
-            Residual(64, 64, use_1x1conv=False, strides=1)
-        )
-
-        # 第二个残差模块
-        self.b2 = nn.Sequential(
-            Residual(64, 128, use_1x1conv=True, strides=2),
-            Residual(128, 128, use_1x1conv=False, strides=1)
-        )
-
-        # 第三个残差模块
-        self.b3 = nn.Sequential(
-            Residual(128, 256, use_1x1conv=True, strides=2),
-            Residual(256, 256, use_1x1conv=False, strides=1)
-        )
-
-        # 第四个残差模块
-        self.b4 = nn.Sequential(
-            Residual(256, 512, use_1x1conv=True, strides=2),
-            Residual(512, 512, use_1x1conv=False, strides=1)
-        )
-
-        # 分类全连接部分
-        self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear(512 * 3 * 3, 1024)
-        self.bn1 = nn.BatchNorm1d(1024)
-        self.relu1 = nn.ReLU()
-        self.dropout1 = nn.Dropout(0.5)
-
-        self.fc2 = nn.Linear(1024, 1024)
-        self.bn2 = nn.BatchNorm1d(1024)
-        self.relu2 = nn.ReLU()
-        self.dropout2 = nn.Dropout(0.5)
-
-        self.fc3 = nn.Linear(1024, num_classes)
+    def __init__(self, in_planes, planes, stride=1):
+        super(BasicBlock, self).__init__()
+        # 第一个卷积层
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes)
+        # 第二个卷积层
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes)
+        # 下采样
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_planes != planes * self.expansion:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_planes, planes * self.expansion, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(planes * self.expansion)
+            )
 
     def forward(self, x):
-        # 前向传播通过每个模块
-        x = self.b1(x)  # 第一个模块
-        x = self.b2(x)  # 第二个模块
-        x = self.b3(x)  # 第三个模块
-        x = self.b4(x)  # 第四个模块
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
 
-        # 分类部分
+# 定义瓶颈残差块（用于 ResNet50）
+class Bottleneck(nn.Module):
+    expansion = 4
+
+    def __init__(self, in_planes, planes, stride=1):
+        super(Bottleneck, self).__init__()
+        # 1x1 卷积
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes)
+        # 3x3 卷积
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes)
+        # 1x1 卷积
+        self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(planes * self.expansion)
+        # 下采样
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_planes != planes * self.expansion:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_planes, planes * self.expansion, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(planes * self.expansion)
+            )
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.relu(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
+
+# 定义 ResNet 主体
+class ResNet(nn.Module):
+    def __init__(self, block, num_blocks, num_classes=7):
+        super(ResNet, self).__init__()
+        self.in_planes = 64
+
+        # 初始卷积层
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)  # 输入通道数为 1
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+        # 残差层
+        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
+
+        # 全局平均池化和全连接层
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        layers = []
+        # 第一个残差块可能需要下采样
+        layers.append(block(self.in_planes, planes, stride))
+        self.in_planes = planes * block.expansion
+        # 后续的残差块
+        for _ in range(1, num_blocks):
+            layers.append(block(self.in_planes, planes))
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        # 前向传播
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+
+        return x
+
+# 构建 ResNet18 模型
+def ResNet18(num_classes=7):
+    return ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
+
+# 构建 ResNet34 模型
+def ResNet34(num_classes=7):
+    return ResNet(BasicBlock, [3, 4, 6, 3], num_classes)
+
+# 构建 ResNet50 模型
+def ResNet50(num_classes=7):
+    return ResNet(Bottleneck, [3, 4, 6, 3], num_classes)
+
+import torch
+import torch.nn as nn
+
+# MLP 模型 1
+class MLP1(nn.Module):
+    def __init__(self, num_classes=7,batch_size=48):
+        super(MLP1, self).__init__()
+        self.flatten = nn.Flatten()
+        self.fc = nn.Sequential(
+            nn.Linear(48 * 48, 128),
+            nn.ReLU(),
+            nn.Linear(128, num_classes)
+        )
+    
+    def forward(self, x):
         x = self.flatten(x)
-        x = self.relu1(self.bn1(self.fc1(x)))
-        x = self.dropout1(x)
-        x = self.relu2(self.bn2(self.fc2(x)))
-        x = self.dropout2(x)
-        x = self.fc3(x)
+        x = self.fc(x)
+        return x
 
+# MLP 模型 2
+class MLP2(nn.Module):
+    def __init__(self, num_classes=7):
+        super(MLP2, self).__init__()
+        self.flatten = nn.Flatten()
+        self.fc = nn.Sequential(
+            nn.Linear(48 * 48, 256),
+            nn.ReLU(),
+            nn.Linear(256, 64),
+            nn.ReLU(),
+            nn.Linear(64, num_classes)
+        )
+    
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.fc(x)
+        return x
+
+# MLP 模型 3
+class MLP3(nn.Module):
+    def __init__(self, num_classes=7):
+        super(MLP3, self).__init__()
+        self.flatten = nn.Flatten()
+        self.fc = nn.Sequential(
+            nn.Linear(48 * 48, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(256, num_classes)
+        )
+    
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.fc(x)
         return x
